@@ -9,8 +9,8 @@ const hexToBinary = require('hex-to-binary');
 // of the hash, making it so that our difficulty adjustment is much more fine grained and therefore it's
 // close to hitting that 1000 millisecond value of the set mine rate.
 
-const {GENESIS_DATA, MINE_RATE} = require('./config')
-const cryptoHash = require('./crypto-hash')
+const {GENESIS_DATA, MINE_RATE} = require('../config')
+const {cryptoHash} = require('../util/')
 
 class block 
 {
