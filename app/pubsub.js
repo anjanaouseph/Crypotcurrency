@@ -3,15 +3,17 @@ const redis = require('redis')
 //So there's less overhead in terms of keeping track of that.
 const CHANNELS = {
   TEST: 'TEST',
-  BLOCKCHAIN: 'BLOCKCHAIN'
+  BLOCKCHAIN: 'BLOCKCHAIN',
+  TRANSACTION: 'TRANSACTION'
 }
 
 class PubSub {
-  constructor({blockchain}) {
+  constructor({blockchain, transactionPool}) {
     //When you instantiate PubSub with new PubSub(), two Redis clients are created: one for publishing (this.publisher) and 
     //one for subscribing (this.subscriber).
 
     this.blockchain = blockchain
+    this.transactionPool = transactionPool
     //First is that we want the blockchain to be able to broadcast its chain.
     //And second, we want the blockchain to try replacing its chain if it receives a valid blockchain message.
     this.publisher = redis.createClient()
@@ -30,10 +32,36 @@ class PubSub {
   handleMessage(channel, message) {
     console.log(`Message received. Channel: ${channel}. Message: ${message}`)
     const parsedMessage = JSON.parse(message)
-    if (channel === CHANNELS.BLOCKCHAIN) {
-      this.blockchain.replaceChain(parsedMessage)//replace chain method has been configured to only replace the chain if the parsed
-      //message and the broadcasted blockchain is a truly valid chain and a longer one.
+  
+    switch(channel) {
+      case CHANNELS.BLOCKCHAIN:
+        //can skip the below `true` flag if we are not using test cases.
+        this.blockchain.replaceChain(parsedMessage, true, () => {//This should take care of clearing the transaction pools across the 
+          //entire network of all recorded
+         // transactions once they're in the blockchain history and the chains have been replaced, including those
+         // transactions within the chain data itself.
+          this.transactionPool.clearBlockchainTransactions({
+             chain: parsedMessage
+          });
+          // in this case we're going to want to pass in a callback function on a successful replace chain that
+          // And in the on success case, well, we want to clear this local transaction pool of the existing blockchain
+          // transactions.
+          // peers can have pools with transactions that have already been mined to the blockchain.
+          // This is an issue because we don't want identical transactions to be counted twice in the blockchain history
+          // Therefore, we're going to add the functionality to clear transaction pools across all nodes in the
+          // network if their blockchains are successfully replaced with transaction data.
+        });
+        break;
+      case CHANNELS.TRANSACTION:
+        this.transactionPool.setTransaction(parsedMessage);
+        break;
+      default:
+        return;
     }
+  
+    //replace chain method has been configured to only replace the chain if the parsed
+    //message and the broadcasted blockchain is a truly valid chain and a longer one.
+  
   }
     subscribeToChannels() {
     Object.values(CHANNELS).forEach(channel => {
@@ -46,6 +74,7 @@ publish({ channel, message }) {
     this.publisher.publish(channel, message, () => {
       this.subscriber.subscribe(channel);
     });
+
     // In our publisher subscriber class, the publisher always publishes a message to itself.
     // Because it broadcasts a message on a channel to every subscriber to that channel.
     // The pub sub class currently sends messages to itself.
@@ -62,6 +91,13 @@ broadcastChain() {
     channel: CHANNELS.BLOCKCHAIN,
     message: JSON.stringify(this.blockchain.chain)
   });
+}
+
+broadcastTransaction(transaction) {
+  this.publish({
+    channel: CHANNELS.TRANSACTION,
+    message: JSON.stringify(transaction)
+  })
 }
 }
 
